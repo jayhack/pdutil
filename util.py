@@ -56,78 +56,98 @@ def list_support (f):
 ####################[ SERIALIZED OPERATIONS ]###################################
 ################################################################################
 
-class OpList:
-
-	def __init__ (self, ops_dict, pass_val=False):
-		self.df = pd.DataFrame (ops_dict)
-
-	def apply (self, ops_df):
-
-	
-	def __add__ (self, ops_df):
-		"""
-			adds the two ops lists
-		"""
-		raise NotImplementedError
-
-	
-	def __sub__ (self, ops_df):
-		"""
-			removes the specified procedures, in order
-			if possible
-		"""
-		
-
-
-
-class ApplyOps:
-
-	def __init__ (self):
-		pass
-
-	def ops_seq (self):
-		pass
-
-	def apply (self, df, ops_df, pass_val=False):
-		"""
-			PUBLIC: apply
-			=============
-			applies operations contained in 
-		"""
-		for name, coltup, oplist in ops_df.iterrows ():
-			for f in oplist:
-				out = f(df[list(coltup)])
-				if pass_val:
-					df = out
-
-
-
-
-
-
-
-
-
-
-
-@list_support
-def retain_cols (df, retain_cols):
+class Op:
 	"""
-		Function: retain_cols
-		=====================
-		Allows one to specify a set of columns to retain in df, if they
-		are present. also supports lists of dataframes. 
-		given columns if they are present. List support.
-
-		params
-		------
-		df - pandas dataframe
-		cols - list of column names to retain if present.
+		Ideal Operation:
+			Op (operations) (dataframes)
+			o1 = Op (operations)
+			o2 = Op (other operations)
+			o3 = o1 + o2
+			o4 = o2 - o1
+			o5 = o1 * 5
+			o1[1:-1] (dataframes)
+			o2["process_text":"run_inference"] (dataframes)
+			o2["step a":"step b"] + o2["step c":"step d"] (dataframes)
+			for command in o2:
+				...
 	"""
-	df.drop (absent_cols(df, retain_cols), axis=1, inplace=True)
+
+	def __init__ (self, script, pass_val=False):
+		if type(script) == list:
+			self.ops_df = pd.DataFrame (script, columns=['stepname', 'in_cols', 'out_col', 'funcs'])
+		elif type(script) == pd.core.frame.DataFrame:
+			self.ops_df = script
+		else:
+			raise Exception ('Argument "script" not recognized')
+		self.ops_df.index = self.ops_df.stepname
+
+
+	def __call__ (self, df, verbose=False):
+		"""
+			MAGIC: __call__
+			===============
+			applies the operations contained in this Op to the specified 
+			dataframe 
+
+			params:
+			-------
+			df: pandas dataframe to apply operations to 
+			inplace: when True (default), return values of operations are disregarded;
+						when false, the output of a given step is the operand of 
+						the subsequent step and the return value is the final output.
+			verbose: when True, prints out the step names
+
+			returns:
+			--------
+			when inplace=False, returns the final output value.
+		"""
+		for stepname, row in self.ops_df.iterrows ():
+			for f in row.funcs:
+				out = f(df[list(row.in_cols)])
+				if row.out_col:
+					df[row.out_col] = out
+
+
+	def __add__ (self, other):
+		"""
+			returns concatenation of the two operations
+			o3 = o1 + o2
+		"""
+		if type(other) != type(self):
+				raise TypeError ('Error: must pass in another Op object')
+		return Op (pd.concat ([self.ops_df, other.ops_df]))
+
+
+	def __mul__ (self, scalar):
+		"""
+			returns the concatenation of this op 
+			n times 
+		"""
+		if type(scalar) != int:
+			raise TypeError ('Error: * operator only accepts integers')
+		return Op(pd.concat ([self.ops_df]*scalar))
+
+
+	def __str__ (self):
+		return self.ops_df.__str__ ()
 
 
 
+
+if __name__ == "__main__":
+
+	df = pd.DataFrame (np.random.randn(5, 2), columns=['A', 'B'])
+	op = Op ([	
+			('Add 1 to A', 		('A',), 'A+1', 		[lambda A: A + 1]),
+			('Square B', 		('B',), 'B*2',		[lambda B: B * 2]),
+			('Add A/B',			('A', 'B'), 'sum',	[lambda df: df.sum (axis=1)]),
+			('Average A/B', 	('A', 'B'), 'mean', [lambda df: df.mean (axis=1)])
+		])
+	op(df)
+	assert int(df['A+1'].sum ()) == int(df['A'].sum () + float(len(df)))
+	assert int(df['B*2'].sum ()) == int(df['B'].sum () * 2.)
+	assert int(df['sum'].mean ()) == int(df[['A', 'B']].sum (axis=1).mean ())
+	assert int(df['mean'].sum ()) == int(df[['A', 'B']].mean (axis=1).sum ())	
 
 
 
